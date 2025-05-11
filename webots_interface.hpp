@@ -1,13 +1,11 @@
 #pragma once
 #include <webots/Motor.hpp>
 #include <webots/PositionSensor.hpp>
-#include <webots/InertialUnit.hpp>
-#include <webots/Gyro.hpp>
 #include <webots/Supervisor.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <webots/Keyboard.hpp>
-#include <webots/Joystick.hpp>
+#include <webots/Camera.hpp>
 
 class WebotsInterface
 {
@@ -36,6 +34,7 @@ private:
     std::vector<webots::Motor *> joint_motor_;
     std::vector<webots::PositionSensor *> joint_sensor_;
     webots::Keyboard *keyboard_;
+    webots::Camera *camera_;
 
     std::string robot_name_ = "X5";
     std::vector<std::string> joint_motor_name_ = {"joint1", "joint2", "joint3", "joint4",

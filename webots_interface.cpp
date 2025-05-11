@@ -71,6 +71,9 @@ void WebotsInterface::initRecv()
     }
     keyboard_ = supervisor_->getKeyboard();
     keyboard_->enable(timestep_);
+
+    camera_ = supervisor_->getCamera("camera");
+    camera_->enable(timestep_);
 }
 
 void WebotsInterface::initSend()
