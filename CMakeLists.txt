@@ -9,7 +9,13 @@ set(WEBOTSLIBRARIES m ${CMAKE_SHARED_LIBRARY_PREFIX}Controller${CMAKE_SHARED_LIB
 add_executable(manipulator_control
     main.cpp
     inverse_kinematics.cpp
-    webots_interface.cpp)
+    webots_interface.cpp
+    fsm_state.cpp
+    fsm_home.cpp
+    joint_state_interpolator.cpp
+    controller.cpp
+    fsm.cpp
+    fsm_passive.cpp)
 
 target_link_directories(manipulator_control PRIVATE ${WEBOTS_HOME}/lib/controller)
 target_include_directories(manipulator_control PRIVATE ${WEBOTS_HOME}/include/controller/cpp)

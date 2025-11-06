@@ -1,4 +1,6 @@
 #include "inverse_kinematics.hpp"
+#include <cmath>
+#include <iostream>
 
 InverseKinematics::InverseKinematics(pinocchio::Model &model)
     : model_(model), data_(model)
@@ -22,25 +24,20 @@ VectorXd InverseKinematics::update(const pinocchio::SE3 &target_pose,
     bool success = false;
     Vector6d ee_err;
     Eigen::VectorXd v(nv_);
-    for (int i = 0;; i++)
+    for (int i = 0; i < IT_MAX; i++)
     {
         pinocchio::forwardKinematics(model_, data_, q);
         pinocchio::updateFramePlacement(model_, data_, gripper_id_);
-        const pinocchio::SE3 iMd = data_.oMf[gripper_id_].actInv(target_pose); // err in SE3 space
-        ee_err = pinocchio::log6(iMd).toVector();                              // err in vector space
+        const pinocchio::SE3 fMd = data_.oMf[gripper_id_].actInv(target_pose); // err in link local frame
+        ee_err = pinocchio::log6(fMd).toVector();                              // vector space
         if (ee_err.norm() < EPS)
         {
             success = true;
             break;
         }
-        if (i >= IT_MAX)
-        {
-            success = false;
-            break;
-        }
-        pinocchio::computeFrameJacobian(model_, data_, q, gripper_id_, J); // J in joint frame
+        pinocchio::computeFrameJacobian(model_, data_, q, gripper_id_, J); // J in link local frame
         pinocchio::Data::Matrix6 Jlog;
-        pinocchio::Jlog6(iMd.inverse(), Jlog);
+        pinocchio::Jlog6(fMd.inverse(), Jlog);
         J = -Jlog * J;
         pinocchio::Data::Matrix6 JJt;
         JJt.noalias() = J * J.transpose();
@@ -54,47 +51,55 @@ VectorXd InverseKinematics::update(const pinocchio::SE3 &target_pose,
         std::cout << "Warning: the iterative algorithm has not reached convergence to the desired precision" << std::endl;
     }
 
+    wrapToLimits(q, model_.lowerPositionLimit, model_.upperPositionLimit);
     return q;
 }
 
-void InverseKinematics::wrapToLimits(VectorXd &q)
+void InverseKinematics::wrapToLimits(VectorXd &q, const VectorXd &q_lower, const VectorXd &q_upper)
 {
+    // 行为约定：
+    // 1) 尝试将每个关节值以 2π 为周期折返到区间 [lower, upper]；
+    // 2) 若区间宽度 < 2π 导致无法折返进入，则对“原值”执行上下界裁剪。
+
+    const double two_pi = 2.0 * M_PI;
+
+    // 返回 x ∈ [0, m) 的正模（m>0）
+    auto positive_mod = [](double x, double m) -> double
+    {
+        double r = std::fmod(x, m);
+        return (r < 0) ? (r + m) : r;
+    };
+
+    // 以 2π 周期围绕下界 lower 折返，返回值位于 [lower, lower+2π)
+    auto fold_by_2pi = [&](double lower, double x) -> double
+    {
+        double offset = positive_mod(x - lower, two_pi); // [0, 2π)
+        return lower + offset;
+    };
+
+    auto clamp = [](double x, double lo, double hi) -> double
+    {
+        return x < lo ? lo : (x > hi ? hi : x);
+    };
+
     for (int j = 0; j < nq_; ++j)
     {
-        const double lower = model_.lowerPositionLimit[j];
-        const double upper = model_.upperPositionLimit[j];
-        const double range = upper - lower;
+        const double lower = q_lower[j];
+        const double upper = q_upper[j];
+        const double x = q[j];
 
-        if (range >= 2.0 * M_PI - 1e-6)
+        // 步骤1：按 2π 折返
+        const double folded = fold_by_2pi(lower, x); // ∈ [lower, lower+2π)
+
+        if (folded <= upper)
         {
-            // 如果关节限位允许超过2pi，则只需 wrap 到 [-pi, pi]
-            q[j] = std::atan2(std::sin(q[j]), std::cos(q[j]));
+            // 成功落入 [lower, upper]
+            q[j] = folded;
         }
         else
         {
-            // 将 q[j] 归一化后补偿到 joint limit 范围内
-            double two_pi = 2.0 * M_PI;
-            double q_wrapped = std::atan2(std::sin(q[j]), std::cos(q[j]));
-
-            // 找到最接近原始 q[j] 的在 [lower, upper] 范围内的周期补偿值
-            double best_q = q_wrapped;
-            double min_diff = std::abs(q[j] - best_q);
-
-            for (int k = -10; k <= 10; ++k)
-            {
-                double candidate = q_wrapped + k * two_pi;
-                if (candidate >= lower && candidate <= upper)
-                {
-                    double diff = std::abs(candidate - q[j]);
-                    if (diff < min_diff)
-                    {
-                        best_q = candidate;
-                        min_diff = diff;
-                    }
-                }
-            }
-
-            q[j] = best_q;
+            // 步骤2：无法折返进入（区间宽度 < 2π）→ 对原值裁剪
+            q[j] = clamp(x, lower, upper);
         }
     }
 }
